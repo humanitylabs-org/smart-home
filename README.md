@@ -6,7 +6,7 @@ A [Wizard app](https://www.aiwizards.com/wizard-apps): install it from the Wizar
 
 - `wizard.md`: what the app is and what it gives the agent (spec: wizard.md v0.2).
 - `runtipi/`: stock Runtipi `config.json` and `docker-compose.yml`. The engine is the official `ghcr.io/home-assistant/home-assistant` image, pinned by digest, unchanged.
-- `mcp/`: the app's front (`front.py` + `tools.py`), inlined into the compose file by `python3 mcp/inline.py`. It creates Home Assistant's owner account on first start, serves the app's page at `/smart-home/` and the agent's tools at `/mcp` (`home_status`, `home_devices`, `home_device`, `home_control`; box-only), and passes everything else unchanged to Home Assistant.
+- `mcp/`: the app's front (`front.py` + `tools.py`), inlined into the compose file by `python3 mcp/inline.py`. It creates Home Assistant's owner account on first start, serves the app's page at `/home-assistant/` (with `/smart-home/` kept as a compatibility alias) and the agent's tools at `/mcp` (`home_status`, `home_devices`, `home_device`, `home_control`; box-only), and passes everything else unchanged to Home Assistant.
 - `SKILL.md`: the skill the agent loads when this app is installed.
 
 ## How it works
@@ -26,3 +26,32 @@ A [Wizard app](https://www.aiwizards.com/wizard-apps): install it from the Wizar
 ## License
 
 Home Assistant is Apache-2.0. The packaging in this repo is Apache-2.0 as well.
+
+## App identity and compatibility
+
+The Wizard app id is `home-assistant`, matching **Home Assistant**.
+`renamed_from: [smart-home]` lets the App Manager move existing installs before
+updating them (`wam app-rename smart-home home-assistant --dry-run` previews it).
+The canonical page and health endpoint are `/home-assistant/` and
+`/home-assistant/healthz`; `/smart-home/` and its API/assets remain aliases.
+The `smart-home` capability, `/mcp` endpoint and `home_*` tool names stay unchanged.
+
+The Compose services use `home-assistant` and `home-assistant-engine`; the old
+service DNS names remain network aliases. The volume key is
+`home-assistant-config`, but its physical name **stays** `wizard-smart-home-config`
+to retain existing owner accounts, tokens and device connections. Likewise the
+OAuth client id `http://smart-home/` must not change: existing refresh tokens are
+bound to it. Source URLs still point to the real, unchanged upstream repo.
+
+Checks (Python 3.10+):
+```sh
+uv run --with pyyaml python -m unittest discover -s tests -v
+python3 mcp/inline.py --check
+```
+The tests use disposable local state and loopback HTTP, never real devices.
+
+Known pre-existing admission issue: current `wam check` rejects the original
+fixed named volume under storage rule 15. This prepared rename retains the
+physical volume deliberately; removing it would discard access to existing
+accounts and devices. Resolve that storage migration separately before release.
+The index checker and the identity/HTTP regression tests pass.

@@ -1,11 +1,11 @@
 ---
-name: smart-home
+name: home-assistant
 description: Use when the owner asks about or wants to control devices at home (air purifier, vacuum, lights, plugs, fans, cameras, air quality, temperature, "is X on", "start the vacuum"). Read and control them with the Home Assistant app.
 ---
 
 # Home Assistant
 
-The Home Assistant app (id smart-home) is Home Assistant run for the owner on this box, or a link to their own Home Assistant if they chose that. It holds the connection to their device brands.
+The Home Assistant app (id home-assistant) is Home Assistant run for the owner on this box, or a link to their own Home Assistant if they chose that. It holds the connection to their device brands.
 
 ## Tools
 

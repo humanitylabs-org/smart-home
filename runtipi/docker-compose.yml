@@ -1,9 +1,9 @@
-# smart-home: the main service is a small MCP front (mcp/front.py + mcp/tools.py, inlined by mcp/inline.py).
-# It sets Home Assistant up by itself, serves the owner's Home page at /smart-home/ and the agent's tools at /mcp
-# (box-only), and passes every other request unchanged to smart-home-engine, the unmodified official Home
+# home-assistant: the main service is a small MCP front (mcp/front.py + mcp/tools.py, inlined by mcp/inline.py).
+# It sets Home Assistant up by itself, serves the owner's Home page at /home-assistant/ and the agent's tools at /mcp
+# (box-only), and passes every other request unchanged to home-assistant-engine, the unmodified official Home
 # Assistant container, so the full Home Assistant app still opens on this app's address.
 services:
-  smart-home:
+  home-assistant:
     image: python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4
     # root inside the container (no capabilities) so it can add integrations to Home Assistant's own config folder
     user: 0:0
@@ -15,10 +15,10 @@ services:
     pids_limit: 256
     mem_limit: 256m
     environment:
-      WIZARD_APP: smart-home
-      APP_VERSION: 0.2.2
+      WIZARD_APP: home-assistant
+      APP_VERSION: 0.2.3
       FRONT_PORT: '8080'
-      UPSTREAM_HOST: smart-home-engine
+      UPSTREAM_HOST: home-assistant-engine
       UPSTREAM_PORT: '8123'
       STRIP_FORWARDED: x-forwarded-for,x-forwarded-host,x-forwarded-proto,forwarded,x-real-ip
       APP_PORT: ${APP_PORT}
@@ -27,9 +27,12 @@ services:
     volumes:
     # Home Assistant's own folder, shared with the engine. A named volume (not app-data) keeps the sign-ins
     # private: Runtipi opens app-data folders to everyone on every update.
-    - smart-home-config:/ha
+    - home-assistant-config:/ha
+    networks:
+      default:
+        aliases: [smart-home]
     depends_on:
-    - smart-home-engine
+    - home-assistant-engine
     command:
     - python
     - -c
@@ -258,7 +261,7 @@ services:
       # Home Assistant app tools: the agent reads and controls the owner's devices through Home Assistant.
       # The engine behind this front is the unmodified official Home Assistant container. This front sets it up
       # by itself (owner account, onboarding), keeps its sign-in in /ha/.wizard (0700, only this app reads it),
-      # serves the owner's Home page at /smart-home/ and the agent's tools at /mcp, and passes everything else
+      # serves the owner's Home page at /home-assistant/ and the agent's tools at /mcp, and passes everything else
       # to Home Assistant unchanged, so the full Home Assistant app still opens on this app's own address.
       import hashlib
       import hmac
@@ -271,9 +274,10 @@ services:
 
       STATE_DIR = os.environ.get("STATE_DIR", "/ha/.wizard")
       COMPONENTS = os.environ.get("COMPONENTS_DIR", "/ha/custom_components")
-      CLIENT_ID = "http://smart-home/"
+      CLIENT_ID = "http://smart-home/"  # Stable OAuth client id: existing refresh tokens are bound to it.
       HA_PORT_PUBLIC = os.environ.get("APP_PORT", "8811")
-      PAGE = "/smart-home/"
+      PAGE = "/home-assistant/"
+      LEGACY_PAGE = "/smart-home/"  # Keep saved links and API callers working.
       _auth_lock = threading.Lock()
       _token = {"access": "", "exp": 0}
 
@@ -834,7 +838,7 @@ services:
           return control(entity_id, action, options, bool(confirmed))
 
 
-      # ---------------- the owner's Home page (/smart-home/) ----------------
+      # ---------------- the owner's Home page (/home-assistant/) ----------------
 
       def _json(code, obj):
           return code, "application/json", json.dumps(obj).encode()
@@ -847,7 +851,10 @@ services:
 
 
       @route(PAGE)
+      @route(LEGACY_PAGE)
       def page_route(method, path, query, headers, body):
+          if path == LEGACY_PAGE.rstrip("/") or path.startswith(LEGACY_PAGE):
+              path = PAGE + path[len(LEGACY_PAGE):]
           sub = path[len(PAGE):] if path.startswith(PAGE) else ""
           if sub.startswith("api/") and headers.get("sec-fetch-site", "same-origin") not in ("same-origin", "none"):
               return _json(403, {"error": "open Home Assistant from your Wizard"})
@@ -899,7 +906,7 @@ services:
 
 
       PAGE_HTML = """<!doctype html>
-      <html lang="en" data-app="smart-home">
+      <html lang="en" data-app="home-assistant">
       <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -1158,7 +1165,7 @@ services:
     x-runtipi:
       is_main: true
       internal_port: 8080
-  smart-home-engine:
+  home-assistant-engine:
     # Unmodified official Home Assistant (Apache-2.0), pinned by digest.
     image: ghcr.io/home-assistant/home-assistant:2026.10.2@sha256:33afb0659d786213264c2211f8d91c5fe87461c56eba6a3a546eb05fc71e89f4
     # Public DNS: some hosts' resolvers fail on brand cloud names (e.g. Xiaomi's device-spec server), which stops devices loading.
@@ -1174,7 +1181,10 @@ services:
     environment:
       TZ: ${TZ:-UTC}
     volumes:
-    - smart-home-config:/config
+    - home-assistant-config:/config
+    networks:
+      default:
+        aliases: [smart-home-engine]
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8123/manifest.json"]
       interval: 30s
@@ -1182,7 +1192,8 @@ services:
       retries: 5
       start_period: 120s
 volumes:
-  smart-home-config:
+  home-assistant-config:
+    # Keep the physical volume name: it holds existing owner credentials and device state.
     name: wizard-smart-home-config
 x-runtipi:
   schema_version: 2
