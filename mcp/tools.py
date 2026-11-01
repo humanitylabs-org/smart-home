@@ -1,7 +1,7 @@
 # Home Assistant app tools: the agent reads and controls the owner's devices through Home Assistant.
 # The engine behind this front is the unmodified official Home Assistant container. This front sets it up
 # by itself (owner account, onboarding), keeps its sign-in in /ha/.wizard (0700, only this app reads it),
-# serves the owner's Home page at /smart-home/ and the agent's tools at /mcp, and passes everything else
+# serves the owner's Home page at /home-assistant/ and the agent's tools at /mcp, and passes everything else
 # to Home Assistant unchanged, so the full Home Assistant app still opens on this app's own address.
 import hashlib
 import hmac
@@ -14,9 +14,10 @@ import zipfile
 
 STATE_DIR = os.environ.get("STATE_DIR", "/ha/.wizard")
 COMPONENTS = os.environ.get("COMPONENTS_DIR", "/ha/custom_components")
-CLIENT_ID = "http://smart-home/"
+CLIENT_ID = "http://smart-home/"  # Stable OAuth client id: existing refresh tokens are bound to it.
 HA_PORT_PUBLIC = os.environ.get("APP_PORT", "8811")
-PAGE = "/smart-home/"
+PAGE = "/home-assistant/"
+LEGACY_PAGE = "/smart-home/"  # Keep saved links and API callers working.
 _auth_lock = threading.Lock()
 _token = {"access": "", "exp": 0}
 
@@ -577,7 +578,7 @@ def home_control(entity_id, action, options=None, confirmed=False):
     return control(entity_id, action, options, bool(confirmed))
 
 
-# ---------------- the owner's Home page (/smart-home/) ----------------
+# ---------------- the owner's Home page (/home-assistant/) ----------------
 
 def _json(code, obj):
     return code, "application/json", json.dumps(obj).encode()
@@ -590,7 +591,10 @@ def _body(headers, body):
 
 
 @route(PAGE)
+@route(LEGACY_PAGE)
 def page_route(method, path, query, headers, body):
+    if path == LEGACY_PAGE.rstrip("/") or path.startswith(LEGACY_PAGE):
+        path = PAGE + path[len(LEGACY_PAGE):]
     sub = path[len(PAGE):] if path.startswith(PAGE) else ""
     if sub.startswith("api/") and headers.get("sec-fetch-site", "same-origin") not in ("same-origin", "none"):
         return _json(403, {"error": "open Home Assistant from your Wizard"})
@@ -642,7 +646,7 @@ def page_route(method, path, query, headers, body):
 
 
 PAGE_HTML = """<!doctype html>
-<html lang="en" data-app="smart-home">
+<html lang="en" data-app="home-assistant">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">

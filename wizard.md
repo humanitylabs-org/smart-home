@@ -1,11 +1,12 @@
 ---
 wizard: 0.2
-id: smart-home
+id: home-assistant
+renamed_from: [smart-home]
 name: Home Assistant
 type: service
 category: app
 tags: [automation]
-version: 0.2.2
+version: 0.2.3
 summary: Home Assistant, set up and run for you. Your Wizard checks and controls your purifiers, vacuums, lights and plugs.
 icon: icon.png
 license: Apache-2.0
@@ -21,9 +22,9 @@ mcp:
 skill: SKILL.md
 provides:
 - smart-home
-health: /smart-home/healthz
+health: /home-assistant/healthz
 view:
-  path: /smart-home/
+  path: /home-assistant/
   port: 8080
 ---
 
