@@ -723,7 +723,7 @@ html.wz-hosted .sh-head h1 { display: none; }
 #list { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 14px; align-items: start; }
 @container wz-app (min-width: 600px) { #list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @container wz-app (min-width: 960px) { #list { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); } }
-.sh-rows { list-style: none; margin: 0; padding: 0; background: var(--solid); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+.sh-rows { list-style: none; margin: 0; padding: 0; background: var(--solid); border: 1px solid var(--line); border-radius: 16px; overflow: clip; }
 .sh-row { display: flex; align-items: center; gap: 12px; min-height: 54px; padding: 8px 14px; }
 .sh-row + .sh-row { border-top: 1px solid var(--line); }
 .sh-main { flex: 1; min-width: 0; }
@@ -747,6 +747,19 @@ html.wz-hosted .sh-head h1 { display: none; }
 .sh-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 18px 0 0; font-size: 13px; color: var(--ink-3); }
 .sh-foot a { display: inline-flex; align-items: center; min-height: 40px; margin-top: 6px; padding: 0 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--solid); color: var(--ink-2); text-decoration: none; }
 .sh-foot span { width: 100%; font-family: ui-monospace, Menlo, monospace; color: var(--ink-2); overflow-wrap: anywhere; }
+/* Friendliness pass (0.2.3): a chevron says a device opens; its title stays on top while open, so closing is one tap;
+   long part lists show the first few; thumb-size targets on touch. */
+.sh-chev { flex: none; width: 9px; height: 9px; margin: 0 4px 0 2px; border-right: 2px solid var(--ink-3); border-bottom: 2px solid var(--ink-3); transform: rotate(45deg) translate(-2px, -2px); transition: transform .15s; }
+.sh-dev details[open] .sh-chev { transform: rotate(-135deg) translate(-2px, -2px); }
+.sh-dev details[open] > summary { position: sticky; top: -6px; z-index: 1; background: var(--solid); border-bottom: 1px solid var(--line); }
+.sh-more .sh-extra { display: none; }
+.sh-more.all .sh-extra { display: flex; }
+.sh-link { min-height: 44px; padding: 0; color: var(--accent); font-weight: 650; font-size: var(--wz-text-md, .875rem); }
+.sh-sw { position: relative; }
+.sh-sw::before { content: ""; position: absolute; inset: -8px -6px; }
+@media (pointer: coarse) {
+  .sh-quiet, .sh-foot a { min-height: 44px; }
+}
 .sh-status { flex: none; margin: 0; padding: 0 18px 8px; color: var(--danger); font-size: 13px; }
 .sh-status:empty { padding: 0; }
 .sh-status.ok { color: var(--ink-2); }
@@ -771,10 +784,15 @@ PAGE_JS = r"""'use strict';
   }
   const KEY = /pm2\.?5|air quality|battery level|filter life|temperature|humidity|mode(?![\s\S])/i;
   const known = d => d.state !== 'unknown' && d.state !== 'unavailable' && !/^\s*\*/.test(short(d));
+  // What a person can read or flip here: no raw data blobs, no press-only buttons or agent commands (the agent has those).
+  const readable = d => !['button', 'notify', 'text', 'event', 'update', 'image'].includes(d.kind) && !/^\s*[[{]/.test(String(d.state));
+  const FEW = 6;
   function short(d) {
     let n = String(d.name || '');
     if (d.device && n.toLowerCase().startsWith(d.device.toLowerCase())) n = n.slice(d.device.length);
-    n = n.trim().split(/\s+/).filter((w, i, a) => i === 0 || w.toLowerCase() !== a[i - 1].toLowerCase()).join(' ');
+    // Home Assistant repeats words ("Battery Battery Level", "Physical Control Locked Current Physical Control Lock"): keep each word once.
+    const seen = new Set();
+    n = n.trim().split(/\s+/).filter(w => { const k = w.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).join(' ');
     return n || d.name;
   }
   function mainOf(items) {
@@ -816,8 +834,15 @@ PAGE_JS = r"""'use strict';
         if (main) sum.appendChild(control(main)); else if (!live.length) sum.appendChild(node('span', 'sh-val', 'Offline'));
         det.appendChild(sum);
         const more = node('ul', 'sh-more');
-        for (const d of live) { if (d === main) continue; const r = node('li', 'sh-row'); r.appendChild(node('span', 'sh-main', short(d))); r.appendChild(control(d)); more.appendChild(r); }
-        if (more.children.length) det.appendChild(more); else sum.classList.add('sh-nomore');
+        // Switches first, then readings; the first few show, the rest one tap away.
+        const parts = live.filter(d => d !== main && readable(d)).sort((a, b) => (b.toggle && /^(on|off)/.test(b.state)) - (a.toggle && /^(on|off)/.test(a.state)));
+        parts.forEach((d, i) => { const r = node('li', 'sh-row' + (i >= FEW ? ' sh-extra' : '')); r.appendChild(node('span', 'sh-main', short(d))); r.appendChild(control(d)); more.appendChild(r); });
+        if (parts.length > FEW) {
+          const li = node('li', 'sh-row sh-showall'), b = node('button', 'sh-link', 'Show all ' + parts.length); b.type = 'button';
+          b.onclick = () => { more.classList.add('all'); li.remove(); };
+          li.appendChild(b); more.appendChild(li);
+        }
+        if (more.children.length) { det.appendChild(more); sum.appendChild(node('span', 'sh-chev')); } else sum.classList.add('sh-nomore');
         li.appendChild(det); ul.appendChild(li);
       }
       sec.appendChild(ul); frag.push(sec);
@@ -884,6 +909,13 @@ PAGE_JS = r"""'use strict';
     try { const a = await api('login'); el('login').textContent = 'User ' + a.username + ' · password ' + a.password; el('login').hidden = false; el('showlogin').hidden = true; }
     catch (e) { say(e.message); }
   };
+  // Back closes an open device first (one tap back), then the shell takes the step.
+  const openDev = () => document.querySelector('.sh-dev details[open]');
+  window.__wizardCloseOverlay = () => { const d = openDev(); if (!d) return false; d.open = false; d.querySelector('summary').focus({preventScroll: true}); return true; };
+  window.WizardApp?.back?.register?.({canGoBack: () => !!openDev(), back: () => window.__wizardCloseOverlay()});
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') window.__wizardCloseOverlay(); });
+  // One device open at a time keeps the list short.
+  el('list').addEventListener('toggle', e => { if (e.target.open) document.querySelectorAll('.sh-dev details[open]').forEach(d => { if (d !== e.target) d.open = false; }); }, true);
   window.WizardApp?.ready?.({name: 'Home Assistant'});
   document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
   load();
