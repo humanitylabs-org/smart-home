@@ -5,7 +5,7 @@ name: Home Assistant
 type: service
 category: app
 tags: [automation]
-version: 0.2.3
+version: 0.2.4
 summary: Home Assistant, set up and run for you. Your Wizard checks and controls your purifiers, vacuums, lights and plugs.
 icon: icon.png
 license: Apache-2.0
@@ -25,6 +25,9 @@ health: /smart-home/healthz
 view:
   path: /smart-home/
   port: 8080
+switches:
+  contract: wizard.app-switches/1
+  path: /api/switches
 ---
 
 # Home Assistant

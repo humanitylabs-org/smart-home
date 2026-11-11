@@ -589,11 +589,83 @@ def _body(headers, body):
     return json.loads(body or b"{}")
 
 
+# ---- wizard.app-switches/1 (wizard-os docs/APP_SWITCHES.md) ----
+# Owner feature switches for the Tracker's Try it. Every new feature ships behind one, off by default: append it to
+# SWITCHES with its issue ({"id", "name", "description", "default": False, "issues": ["humanitylabs-org/smart-home#N"]})
+# and gate it on switch_on(id). Kept on the box (STATE_DIR/switches.json). Owner only: the box's Tailscale Serve login
+# with X-Wizard-Switch: 1; never a bearer or a box-local host.
+SWITCHES = []
+_SW_LOCAL = {"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"}
+
+
+def switches_doc():
+    saved = _read_json("switches.json", {}) or {}
+    return {"contract": "wizard.app-switches/1", "switches": [
+        dict(x, on=saved[x["id"]] if isinstance(saved.get(x["id"]), bool) else bool(x.get("default"))) for x in SWITCHES]}
+
+
+def switch_on(switch_id):
+    return next((x["on"] for x in switches_doc()["switches"] if x["id"] == switch_id), False)
+
+
+def _sw_owner(headers, write):
+    if headers.get("authorization") or headers.get("x-wizard-switch") != "1":
+        return False
+    host = (headers.get("host") or "").strip().lower()
+    name = host.split("]")[0] + "]" if host.startswith("[") else host.rsplit(":", 1)[0]
+    if not name or name in _SW_LOCAL or "." not in name:
+        return False
+    origin = headers.get("origin")
+    if origin and urllib.parse.urlsplit(origin).netloc.lower() != host:
+        return False
+    if write and not origin:
+        return False
+    login = headers.get("tailscale-user-login") or ""
+    owners = {x.strip().lower() for x in (os.environ.get("WIZARD_OWNER_LOGINS") or "").split(",") if x.strip()}
+    return "@" in login and "," not in login and (not owners or login.strip().lower() in owners)
+
+
+def switches_route(method, headers, body):
+    if method in ("GET", "HEAD"):
+        if not _sw_owner(headers, False):
+            return _json(403, {"error": "Only this Wizard's owner can see these switches.", "code": "owner_only"})
+        return _json(200, switches_doc())
+    if method != "POST":
+        return _json(405, {"error": "method"})
+    if not _sw_owner(headers, True):
+        return _json(403, {"error": "Only this Wizard's owner can change these switches.", "code": "owner_only"})
+    try:
+        if (headers.get("content-type") or "").split(";")[0].strip() != "application/json" or not body or len(body) > 4096:
+            raise ValueError
+        d = json.loads(body)
+        if not isinstance(d, dict) or not isinstance(d.get("id"), str) or not isinstance(d.get("on"), bool) or set(d) - {"id", "on"}:
+            raise ValueError
+    except (ValueError, TypeError):
+        return _json(400, {"error": 'Send JSON {"id": "...", "on": true|false}', "code": "invalid_input"})
+    if d["id"] not in {x["id"] for x in SWITCHES}:
+        return _json(404, {"error": "No such switch", "code": "unknown_switch"})
+    ids = {x["id"] for x in SWITCHES}
+    saved = {k: v for k, v in (_read_json("switches.json", {}) or {}).items() if k in ids and isinstance(v, bool)}
+    saved[d["id"]] = d["on"]
+    _write_json("switches.json", saved)
+    return _json(200, switches_doc())
+
+
+@route("/api/switches")
+def switches_bare_route(method, path, query, headers, body):
+    if path.rstrip("/") != "/api/switches":
+        return _json(404, {"error": "not found"})
+    return switches_route(method, headers, body)
+# ---- end wizard.app-switches/1 ----
+
+
 @route(PAGE)
 def page_route(method, path, query, headers, body):
     sub = path[len(PAGE):] if path.startswith(PAGE) else ""
     if sub.startswith("api/") and headers.get("sec-fetch-site", "same-origin") not in ("same-origin", "none"):
         return _json(403, {"error": "open Home Assistant from your Wizard"})
+    if sub in ("api/switches", "api/switches/"):
+        return switches_route(method, headers, body)
     try:
         if method == "GET" and sub in ("", "index.html"):
             return 200, "text/html; charset=utf-8", PAGE_HTML.encode()
